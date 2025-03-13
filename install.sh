@@ -143,34 +143,44 @@ apt install -y grub-efi-amd64 os-prober
 echo "DEBUG: Running os-prober to detect other operating systems (e.g., Windows)..."
 os-prober
 
-echo "DEBUG: Enabling os-prober in GRUB configuration..."
+echo "DEBUG: Configuring GRUB for UEFI..."
+# Enable os-prober
 if grep -q "^GRUB_DISABLE_OS_PROBER=" /etc/default/grub; then
   sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
 else
   echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
 fi
 
-echo "DEBUG: Setting GRUB timeout to 15 seconds..."
+# Set GRUB timeout to 15 seconds
 if grep -q "^GRUB_TIMEOUT=" /etc/default/grub; then
   sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=15/' /etc/default/grub
 else
   echo "GRUB_TIMEOUT=15" >> /etc/default/grub
 fi
 
-echo "DEBUG: Setting Windows Boot Manager as the default boot option (if detected)..."
-WINDOWS_ENTRY=$(os-prober | grep -i "windows" | cut -d':' -f2 | sed 's/^ *//;s/ *$//')
-if [ -n "$WINDOWS_ENTRY" ]; then
-  echo "DEBUG: Windows Boot Manager found: $WINDOWS_ENTRY"
-  if grep -q "^GRUB_DEFAULT=" /etc/default/grub; then
-    sed -i "s|^GRUB_DEFAULT=.*|GRUB_DEFAULT=\"${WINDOWS_ENTRY}\"|" /etc/default/grub
-  else
-    echo "GRUB_DEFAULT=\"${WINDOWS_ENTRY}\"" >> /etc/default/grub
-  fi
+# Use saved default method so we can set a default entry
+if grep -q "^GRUB_DEFAULT=" /etc/default/grub; then
+  sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
 else
-  echo "DEBUG: Windows Boot Manager not found; keeping default Ubuntu boot."
+  echo "GRUB_DEFAULT=saved" >> /etc/default/grub
+fi
+
+if ! grep -q "^GRUB_SAVEDEFAULT=" /etc/default/grub; then
+  echo "GRUB_SAVEDEFAULT=true" >> /etc/default/grub
 fi
 
 echo "DEBUG: Updating GRUB configuration..."
 update-grub
+
+echo "DEBUG: Attempting to set Windows Boot Manager as the default boot entry..."
+# Extract the Windows Boot Manager menu entry from /boot/grub/grub.cfg.
+# This looks for a menuentry with "Windows Boot Manager" in its title.
+WINDOWS_MENU=$(grep "menuentry 'Windows Boot Manager" /boot/grub/grub.cfg | head -n 1 | cut -d"'" -f2)
+if [ -n "$WINDOWS_MENU" ]; then
+  grub-set-default "$WINDOWS_MENU"
+  echo "DEBUG: Set default boot entry to '$WINDOWS_MENU'."
+else
+  echo "DEBUG: Windows Boot Manager not found in grub.cfg; default remains Ubuntu."
+fi
 
 echo "DEBUG: Environment setup complete."
