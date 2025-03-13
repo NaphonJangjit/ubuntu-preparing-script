@@ -134,4 +134,43 @@ echo "DEBUG: Build complete."
 EOF
 chmod +x /usr/local/bin/build
 
+# -------------------------------
+# Install and Configure GRUB for UEFI
+# -------------------------------
+echo "DEBUG: Installing GRUB for UEFI and os-prober..."
+apt install -y grub-efi-amd64 os-prober
+
+echo "DEBUG: Running os-prober to detect other operating systems (e.g., Windows)..."
+os-prober
+
+echo "DEBUG: Enabling os-prober in GRUB configuration..."
+if grep -q "^GRUB_DISABLE_OS_PROBER=" /etc/default/grub; then
+  sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
+else
+  echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
+fi
+
+echo "DEBUG: Setting GRUB timeout to 15 seconds..."
+if grep -q "^GRUB_TIMEOUT=" /etc/default/grub; then
+  sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=15/' /etc/default/grub
+else
+  echo "GRUB_TIMEOUT=15" >> /etc/default/grub
+fi
+
+echo "DEBUG: Setting Windows Boot Manager as the default boot option (if detected)..."
+WINDOWS_ENTRY=$(os-prober | grep -i "windows" | cut -d':' -f2 | sed 's/^ *//;s/ *$//')
+if [ -n "$WINDOWS_ENTRY" ]; then
+  echo "DEBUG: Windows Boot Manager found: $WINDOWS_ENTRY"
+  if grep -q "^GRUB_DEFAULT=" /etc/default/grub; then
+    sed -i "s|^GRUB_DEFAULT=.*|GRUB_DEFAULT=\"${WINDOWS_ENTRY}\"|" /etc/default/grub
+  else
+    echo "GRUB_DEFAULT=\"${WINDOWS_ENTRY}\"" >> /etc/default/grub
+  fi
+else
+  echo "DEBUG: Windows Boot Manager not found; keeping default Ubuntu boot."
+fi
+
+echo "DEBUG: Updating GRUB configuration..."
+update-grub
+
 echo "DEBUG: Environment setup complete."
