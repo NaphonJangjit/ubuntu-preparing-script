@@ -58,7 +58,6 @@ apt update && apt install -y code
 
 # Install C/C++ extension for VS Code (attempt to force version 1.24, if possible)
 echo "DEBUG: Installing C/C++ extension for VS Code..."
-# This uses the SUDO_USER variable so that the extension installs for the non-root user.
 if [ -n "$SUDO_USER" ]; then
   sudo -u "$SUDO_USER" code --install-extension ms-vscode.cpptools --force
 else
@@ -73,9 +72,6 @@ apt install -y firefox
 
 # -------------------------------
 # Create wrapper scripts in /usr/local/bin to override default gcc and g++ commands
-# These wrappers force the default flags:
-#   For C:   /usr/bin/gcc-11 -DEVAL -std=c11 -O2 -pipe -static -s -o outputFile <source> -lm
-#   For C++: /usr/bin/g++-11 -DEVAL -std=c++17 -O2 -pipe -static -s -o outputFile <source>
 # -------------------------------
 echo "DEBUG: Creating gcc wrapper script in /usr/local/bin/gcc..."
 cat << 'EOF' > /usr/local/bin/gcc
@@ -107,7 +103,6 @@ chmod +x /usr/local/bin/g++
 
 # -------------------------------
 # Create a build script that selects the compiler based on file extension.
-# Usage: build <source_file> [output_file]
 # -------------------------------
 echo "DEBUG: Creating build script in /usr/local/bin/build..."
 cat << 'EOF' > /usr/local/bin/build
@@ -174,7 +169,6 @@ update-grub
 
 echo "DEBUG: Attempting to set Windows Boot Manager as the default boot entry..."
 # Extract the Windows Boot Manager menu entry from /boot/grub/grub.cfg.
-# This looks for a menuentry with "Windows Boot Manager" in its title.
 WINDOWS_MENU=$(grep "menuentry 'Windows Boot Manager" /boot/grub/grub.cfg | head -n 1 | cut -d"'" -f2)
 if [ -n "$WINDOWS_MENU" ]; then
   grub-set-default "$WINDOWS_MENU"
