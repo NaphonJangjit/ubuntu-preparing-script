@@ -71,19 +71,29 @@ echo "DEBUG: Installing Firefox..."
 apt install -y firefox
 
 # -------------------------------
-# Create wrapper scripts in /usr/local/bin to override default gcc and g++ commands
+# Create custom gcc and g++ wrapper scripts in /usr/local/bin
 # -------------------------------
 echo "DEBUG: Creating gcc wrapper script in /usr/local/bin/gcc..."
 cat << 'EOF' > /usr/local/bin/gcc
 #!/bin/bash
 echo "DEBUG: Overriding gcc command with default C flags."
-if [ "$#" -lt 1 ]; then
-  echo "DEBUG: No source file provided."
-  exit 1
+
+# Check if the output flag is specified
+output_specified=false
+for arg in "$@"; do
+  if [ "$arg" = "-o" ] || [[ "$arg" =~ ^-o.+ ]]; then
+    output_specified=true
+    break
+  fi
+done
+
+# If no -o flag is present, append default "-o a"
+if [ "$output_specified" = false ]; then
+  set -- "$@" -o a
 fi
-src="$1"
-echo "DEBUG: Compiling $src using gcc default flags."
-exec /usr/bin/gcc-11 -DEVAL -std=c11 -O2 -pipe -static -s -o outputFile "$src" -lm
+
+echo "DEBUG: Compiling with custom gcc flags."
+exec /usr/bin/gcc-11 -DEVAL -std=c11 -O2 -pipe -static -s "$@" -lm
 EOF
 chmod +x /usr/local/bin/gcc
 
@@ -91,13 +101,23 @@ echo "DEBUG: Creating g++ wrapper script in /usr/local/bin/g++..."
 cat << 'EOF' > /usr/local/bin/g++
 #!/bin/bash
 echo "DEBUG: Overriding g++ command with default C++ flags."
-if [ "$#" -lt 1 ]; then
-  echo "DEBUG: No source file provided."
-  exit 1
+
+# Check if the output flag is specified
+output_specified=false
+for arg in "$@"; do
+  if [ "$arg" = "-o" ] || [[ "$arg" =~ ^-o.+ ]]; then
+    output_specified=true
+    break
+  fi
+done
+
+# If no -o flag is present, append default "-o a"
+if [ "$output_specified" = false ]; then
+  set -- "$@" -o a
 fi
-src="$1"
-echo "DEBUG: Compiling $src using g++ default flags."
-exec /usr/bin/g++-11 -DEVAL -std=c++17 -O2 -pipe -static -s -o outputFile "$src"
+
+echo "DEBUG: Compiling with custom g++ flags."
+exec /usr/bin/g++-11 -DEVAL -std=c++17 -O2 -pipe -static -s "$@"
 EOF
 chmod +x /usr/local/bin/g++
 
@@ -113,7 +133,7 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 src="$1"
-out="${2:-outputFile}"
+out="${2:-a}"
 ext="${src##*.}"
 if [ "$ext" = "c" ]; then
   echo "DEBUG: Detected C source file."
@@ -130,14 +150,77 @@ EOF
 chmod +x /usr/local/bin/build
 
 # -------------------------------
+# Create VS Code configuration files for run/debug integration (optional)
+# -------------------------------
+if [ -n "$SUDO_USER" ]; then
+  user_home=$(eval echo ~"$SUDO_USER")
+  vscode_dir="$user_home/.vscode"
+  mkdir -p "$vscode_dir"
+  echo "DEBUG: Creating VS Code tasks.json in $vscode_dir..."
+  cat << 'EOF' > "$vscode_dir/tasks.json"
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Active C/C++ File",
+      "type": "shell",
+      "command": "gcc",
+      "args": [
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    }
+  ]
+}
+EOF
+
+  echo "DEBUG: Creating VS Code launch.json in $vscode_dir..."
+  cat << 'EOF' > "$vscode_dir/launch.json"
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Executable",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${fileDirname}/${fileBasenameNoExtension}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}
+EOF
+
+  chown "$SUDO_USER":"$SUDO_USER" "$vscode_dir/tasks.json" "$vscode_dir/launch.json"
+  echo "DEBUG: VS Code configuration files created in $vscode_dir."
+fi
+
+# -------------------------------
 # Install and Configure GRUB for UEFI
 # -------------------------------
 echo "DEBUG: Installing GRUB for UEFI and os-prober..."
 apt install -y grub-efi-amd64 os-prober
-
 echo "DEBUG: Running os-prober to detect other operating systems (e.g., Windows)..."
 os-prober
-
 echo "DEBUG: Configuring GRUB for UEFI..."
 # Enable os-prober
 if grep -q "^GRUB_DISABLE_OS_PROBER=" /etc/default/grub; then
@@ -145,28 +228,23 @@ if grep -q "^GRUB_DISABLE_OS_PROBER=" /etc/default/grub; then
 else
   echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
 fi
-
 # Set GRUB timeout to 15 seconds
 if grep -q "^GRUB_TIMEOUT=" /etc/default/grub; then
   sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=15/' /etc/default/grub
 else
   echo "GRUB_TIMEOUT=15" >> /etc/default/grub
 fi
-
 # Use saved default method so we can set a default entry
 if grep -q "^GRUB_DEFAULT=" /etc/default/grub; then
   sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
 else
   echo "GRUB_DEFAULT=saved" >> /etc/default/grub
 fi
-
 if ! grep -q "^GRUB_SAVEDEFAULT=" /etc/default/grub; then
   echo "GRUB_SAVEDEFAULT=true" >> /etc/default/grub
 fi
-
 echo "DEBUG: Updating GRUB configuration..."
 update-grub
-
 echo "DEBUG: Attempting to set Windows Boot Manager as the default boot entry..."
 # Extract the Windows Boot Manager menu entry from /boot/grub/grub.cfg.
 WINDOWS_MENU=$(grep "menuentry 'Windows Boot Manager" /boot/grub/grub.cfg | head -n 1 | cut -d"'" -f2)
